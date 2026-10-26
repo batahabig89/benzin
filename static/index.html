@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Бензин хаана байна</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1a1d23; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --ok: #16a34a; --ok-bg: #dcfce7; --warn: #b45309; --warn-bg: #fef3c7;
+    --bad: #dc2626; --bad-bg: #fee2e2; --grey-bg: #f1f5f9; --hover: #f8fafc;
+    --refill: #2563eb; --sell: #16a34a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #181b21; --text: #e6e8eb; --muted: #9aa1ab; --line: #2a2f37;
+      --accent: #60a5fa; --ok: #4ade80; --ok-bg: #14321f; --warn: #fbbf24; --warn-bg: #3a2c0b;
+      --bad: #f87171; --bad-bg: #3b1515; --grey-bg: #232830; --hover: #1e2229;
+      --refill: #60a5fa; --sell: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 20px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: progress; }
+  button.ghost { background: none; color: var(--accent); padding: 0; font-weight: 500; }
+  label { color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  select { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); }
+  #status { color: var(--muted); font-size: 13px; }
+  #status.err { color: var(--bad); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; margin-bottom: 20px; }
+  section h2 { font-size: 17px; margin: 0 0 4px; display: flex; gap: 8px; align-items: center; }
+  section h2 .n { color: var(--muted); font-weight: 500; font-size: 14px; }
+  section .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; }
+  #map { height: 420px; border-radius: 8px; }
+  .legend { display: flex; gap: 16px; color: var(--muted); font-size: 13px; margin-top: 8px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; gap: 6px; align-items: center; }
+  .pin { width: 26px; height: 26px; border-radius: 50%; color: #fff; font: 600 12px/26px system-ui;
+    text-align: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+  .pin.refill { background: var(--refill); }
+  .pin.sell { background: var(--sell); }
+  .pin.both { background: linear-gradient(135deg, var(--sell) 50%, var(--refill) 50%); }
+  .tbl { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted);
+    border-top: 0; white-space: nowrap; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--hover); }
+  td small { display: block; color: var(--muted); font-size: 12px; }
+  td.num { color: var(--muted); font-weight: 600; width: 1%; }
+  .when b { white-space: nowrap; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+    font-weight: 600; background: var(--ok-bg); color: var(--ok); margin: 0 4px 2px 0; }
+  .chip.est, .chip.queue { background: var(--warn-bg); color: var(--warn); }
+  .chip.out, .chip.stop { background: var(--bad-bg); color: var(--bad); }
+  .chip.unknown { background: var(--grey-bg); color: var(--muted); }
+  .cam-badge { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .empty { color: var(--muted); padding: 12px 8px; }
+  .hidden { display: none !important; }
+
+  /* Станцын дэлгэрэнгүй */
+  dialog { border: 0; border-radius: 14px; padding: 0; width: min(720px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px); background: var(--card); color: var(--text); }
+  dialog::backdrop { background: rgba(0,0,0,.5); }
+  .dlg-head { display: flex; justify-content: space-between; gap: 12px; padding: 16px 16px 8px;
+    position: sticky; top: 0; background: var(--card); z-index: 1; }
+  .dlg-head h3 { margin: 0; font-size: 18px; }
+  .dlg-head small { color: var(--muted); display: block; }
+  .close { background: var(--grey-bg); color: var(--text); padding: 4px 12px; font-size: 18px; }
+  .dlg-body { padding: 0 16px 16px; }
+  .dlg-body h4 { font-size: 14px; margin: 18px 0 8px; }
+  video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 16 / 7; }
+  .cam-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .cam-tabs button { background: var(--grey-bg); color: var(--text); padding: 4px 10px; font-size: 13px; font-weight: 500; }
+  .cam-tabs button.on { background: var(--accent); color: #fff; }
+  #cam-note { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+  .fuels { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .fuel { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .fuel b { display: block; }
+  .fuel small { display: block; color: var(--muted); font-size: 12px; }
+  .tank { height: 6px; border-radius: 3px; background: var(--grey-bg); margin: 6px 0 4px; overflow: hidden; }
+  .tank i { display: block; height: 100%; }
+  .state-line { margin: 0; font-weight: 600; }
+  .muted { color: var(--muted); font-size: 13px; }
+  ul.hist { list-style: none; margin: 0; padding: 0; }
+  ul.hist li { border-top: 1px solid var(--line); padding: 8px 0; font-size: 14px; }
+  ul.hist li small { color: var(--muted); display: block; }
+
+  @media (max-width: 640px) {
+    #map { height: 320px; }
+    thead { display: none; }
+    tr { display: block; border-top: 1px solid var(--line); padding: 8px 0; }
+    td { display: block; border: 0; padding: 3px 0; }
+    td.num { display: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>⛽ Бензин хаана байна</h1>
+  <p class="sub">Улаанбаатар хот доторх ШТС · benzin.mn дээрх ШТС-ын системийн (oil.mrpam.gov.mn) мэдээ</p>
+
+  <div class="bar">
+    <button id="load">Жагсаалт гаргах</button>
+    <label><input type="checkbox" id="euro92"> Евро-92 оруулах</label>
+    <label>Дүүрэг:
+      <select id="district"><option value="">Бүх дүүрэг</option></select>
+    </label>
+    <label><input type="checkbox" id="outer"> Хотын гаднах (Налайх г.м.)</label>
+    <label>Орлогын түлш:
+      <select id="fuel">
+        <option value="">Бүгд</option>
+        <option value="Аи-92" selected>Аи-92</option>
+        <option value="Евро-92">Евро-92</option>
+        <option value="Аи-95">Аи-95</option>
+        <option value="ДТ">ДТ</option>
+        <option value="Евро ДТ">Евро ДТ</option>
+      </select>
+    </label>
+    <span id="status"></span>
+  </div>
+
+  <section id="map-sec" class="hidden">
+    <div id="map"></div>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--refill)"></i>Орлого буусан</span>
+      <span><i class="dot" style="background:var(--sell)"></i>92 хэвийн өгч байна</span>
+      <span>Дугаар = жагсаалтын дугаар · дарвал дэлгэрэнгүй</span>
+    </div>
+  </section>
+
+  <section id="refilled" class="hidden">
+    <h2><i class="dot" style="background:var(--refill)"></i>1. Орлого буусан ШТС <span class="n"></span></h2>
+    <p class="hint">Сүүлд орлого буусан цагаар нь эрэмбэлсэн (шинэ нь дээрээ). Систем савны түвшин өссөн хоёр хэмжилтийн хооронд орлого буусан гэж тооцдог. Мөр дээр дарж камер, түлшний төлөвийг харна.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>#</th><th>Орлого буусан</th><th>ШТС</th><th>Байршил</th><th>Түлш</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section id="selling92" class="hidden">
+    <h2><i class="dot" style="background:var(--sell)"></i>2. 92 бензин хэвийн өгч байгаа ШТС <span class="n"></span></h2>
+    <p class="hint">Түгээлт явж байгаа, 92 нь «Хэвийн» төлөвтэй (дуусаагүй, дундраагүй). ШТС мэдээгээ шинэчилсэн цагаар нь эрэмбэлсэн.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>#</th><th>Шинэчилсэн</th><th>ШТС</th><th>Байршил</th><th>92 бензин</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+</main>
+
+<dialog id="dlg">
+  <div class="dlg-head">
+    <div><h3 id="d-name"></h3><small id="d-meta"></small></div>
+    <button class="close" id="d-close" aria-label="Хаах">×</button>
+  </div>
+  <div class="dlg-body" id="d-body"></div>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+let data = null;
+let map = null;
+let markers = null;
+let hls = null;
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function clock(iso) {
+  const d = new Date(iso);
+  if (!iso || isNaN(d)) return '';
+  const two = (n) => String(n).padStart(2, '0');
+  const t = `${two(d.getHours())}:${two(d.getMinutes())}`;
+  return d.toDateString() === new Date().toDateString()
+    ? `Өнөөдөр ${t}` : `${two(d.getMonth() + 1)}-${two(d.getDate())} ${t}`;
+}
+
+function ago(iso) {
+  const t = new Date(iso).getTime();
+  if (!iso || isNaN(t)) return '';
+  const min = Math.max(0, Math.round((Date.now() - t) / 60e3));
+  if (min < 60) return `${Math.max(1, min)} минутын өмнө`;
+  if (min < 1440) return `${Math.floor(min / 60)} цагийн өмнө`;
+  return `${Math.floor(min / 1440)} өдрийн өмнө`;
+}
+
+const money = (v) => v == null ? '' : `${Number(v).toLocaleString('en-US').replace(/,/g, ' ')}₮`;
+
+function stationCell(r) {
+  const meta = [r.brand, r.operator].filter(Boolean).join(' · ');
+  return `<td><b>${esc(r.name)}</b>${r.cams ? ` <span class="cam-badge">📷 ${r.cams}</span>` : ''}
+    ${meta ? `<small>${esc(meta)}</small>` : ''}${r.work_hours ? `<small>🕒 ${esc(r.work_hours)}</small>` : ''}</td>`;
+}
+
+function placeCell(r) {
+  return `<td><b>${esc(r.district)}</b>${r.address ? `<small>${esc(r.address)}</small>` : ''}
+    <small><button class="ghost" data-show="${esc(r.id)}">📍 Газрын зураг дээр</button>
+    · <a href="${esc(r.map_url)}" target="_blank" rel="noopener">Google Maps</a></small></td>`;
+}
+
+const placeOk = (r) => (r.in_city || $('#outer').checked)
+  && (!$('#district').value || r.district === $('#district').value);
+
+// Дүүргийн сонголт: татсан өгөгдөлд байгаа дүүргүүд, хотын гаднах нь checkbox-оор.
+function fillDistricts() {
+  const sel = $('#district');
+  const keep = sel.value;
+  const names = [...new Set([...data.refilled, ...data.selling92]
+    .filter((r) => r.in_city || $('#outer').checked).map((r) => r.district).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'mn'));
+  sel.innerHTML = '<option value="">Бүх дүүрэг</option>'
+    + names.map((n) => `<option${n === keep ? ' selected' : ''}>${esc(n)}</option>`).join('');
+}
+
+function refilledRows() {
+  const fuel = $('#fuel').value;
+  return data.refilled.filter((r) => placeOk(r) && (!fuel || r.fuels.includes(fuel)));
+}
+
+function sellingRows() {
+  const grades = $('#euro92').checked ? ['ai92', 'euro92'] : ['ai92'];
+  return data.selling92.filter(placeOk)
+    .map((r) => ({ ...r, fuels: r.fuels.filter((f) => grades.includes(f.code)) }))
+    .filter((r) => r.fuels.length);
+}
+
+function renderRefilled(rows) {
+  const sec = $('#refilled');
+  sec.querySelector('.n').textContent = `(${rows.length})`;
+  sec.querySelector('tbody').innerHTML = rows.length ? rows.map((r, i) => `<tr data-id="${esc(r.id)}">
+      <td class="num">${i + 1}</td>
+      <td class="when"><b>${esc(clock(r.refill_at))}</b><small>${esc(ago(r.refill_at))}</small>
+        ${r.refill_from ? `<small>${esc(clock(r.refill_from))} – ${esc(clock(r.refill_at))} хооронд</small>` : ''}</td>
+      ${stationCell(r)}${placeCell(r)}
+      <td>${r.fuels.map((f) => `<span class="chip">${esc(f)}</span>`).join('')}
+        ${r.changes.map((c) => `<small>${esc(c)}</small>`).join('')}</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="empty">Тохирох ШТС алга.</td></tr>';
+  sec.classList.remove('hidden');
+}
+
+function renderSelling(rows) {
+  const sec = $('#selling92');
+  sec.querySelector('.n').textContent = `(${rows.length})`;
+  sec.querySelector('tbody').innerHTML = rows.length ? rows.map((r, i) => `<tr data-id="${esc(r.id)}">
+      <td class="num">${i + 1}</td>
+      <td class="when"><b>${esc(clock(r.said_at))}</b><small>${esc(ago(r.said_at))}</small></td>
+      ${stationCell(r)}${placeCell(r)}
+      <td>${r.fuels.map((f) => {
+        const left = f.cars_left != null ? `~${f.cars_left} машинд хүрэлцэнэ` : '';
+        const tank = f.tank_level ? `Сав: ${f.tank_level}${f.tank_measured_at ? ` (${clock(f.tank_measured_at)}-ийн хэмжилт)` : ''}` : '';
+        return `<span class="chip${f.estimated ? ' est' : ''}">${esc(f.label)} · Хэвийн${f.estimated ? ' (тооцоолсон)' : ''}</span>
+          ${[money(f.price), left, f.nozzles != null ? `${f.nozzles} хошуу` : '', tank]
+            .filter(Boolean).map((x) => `<small>${esc(x)}</small>`).join('')}`;
+      }).join('')}</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="empty">Одоогоор 92 бензин хэвийн өгч байгаа ШТС алга.</td></tr>';
+  sec.classList.remove('hidden');
+}
+
+/* Газрын зураг: хоёр жагсаалтын ШТС, жагсаалт дахь дугаартай. Хоёуланд нь орсон
+   ШТС нэг тэмдэгтэй (хоёр өнгөтэй). */
+function renderMap(refilled, selling) {
+  $('#map-sec').classList.remove('hidden');
+  if (!map) {
+    map = L.map('map').setView([47.9186, 106.9177], 12);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap',
+    }).addTo(map);
+    markers = L.layerGroup().addTo(map);
+  }
+  markers.clearLayers();
+  const byId = new Map();
+  refilled.forEach((r, i) => byId.set(r.id, { r, refill: i + 1 }));
+  selling.forEach((r, i) => {
+    const e = byId.get(r.id) || { r };
+    e.sell = i + 1;
+    byId.set(r.id, e);
+  });
+  const pts = [];
+  byId.forEach((e, id) => {
+    if (e.r.lat == null) return;
+    const cls = e.refill && e.sell ? 'both' : e.refill ? 'refill' : 'sell';
+    const label = e.sell && !e.refill ? e.sell : e.refill;
+    const tip = [e.refill ? `Орлого #${e.refill}` : '', e.sell ? `92 #${e.sell}` : ''].filter(Boolean).join(' · ');
+    const m = L.marker([e.r.lat, e.r.lon], {
+      icon: L.divIcon({ className: '', html: `<div class="pin ${cls}">${label}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
+      zIndexOffset: e.sell ? 1000 : 0,
+    }).bindTooltip(`<b>${esc(e.r.name)}</b><br>${esc(tip)}<br>${esc(e.r.address || e.r.district)}`);
+    m.on('click', () => openStation(id));
+    m.stationId = id;
+    markers.addLayer(m);
+    pts.push([e.r.lat, e.r.lon]);
+  });
+  if (pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 14 });
+  setTimeout(() => map.invalidateSize(), 0);
+}
+
+function showOnMap(id) {
+  const m = markers && markers.getLayers().find((x) => x.stationId === id);
+  if (!m) return;
+  $('#map-sec').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  map.setView(m.getLatLng(), 16);
+  m.openTooltip();
+}
+
+function render() {
+  fillDistricts();
+  const refilled = refilledRows();
+  const selling = sellingRows();
+  renderRefilled(refilled);
+  renderSelling(selling);
+  renderMap(refilled, selling);
+  const total = $('#outer').checked ? data.total_stations : data.city_stations;
+  $('#status').textContent = `benzin.mn-ээс ${clock(data.fetched_at)}-д татсан (${ago(data.fetched_at)}) · ${total} ШТС`;
+}
+
+/* data.json: GitHub Pages дээр Actions ~10 минут тутам бичдэг статик файл, локал
+   server.py дээр хүсэлт бүрт шинээр татдаг. Харьцангуй зам — Pages /<repo>/ дор байна. */
+async function load() {
+  const btn = $('#load');
+  const status = $('#status');
+  btn.disabled = true;
+  status.className = '';
+  status.textContent = 'Татаж байна…';
+  try {
+    const res = await fetch(`data.json?t=${Date.now()}`, { cache: 'no-store' });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || res.statusText);
+    data = json;
+    render();
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = `Алдаа: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Дахин шинэчлэх';
+  }
+}
+
+/* ---- Станцын дэлгэрэнгүй: камер, түлш тус бүрийн төлөв, хүмүүсийн мэдээ ---- */
+
+const TANK = { 'Хоосон': 4, 'Бага': 18, 'Дундарсан': 50, 'Хэвийн': 75, 'Хангалттай': 80, 'Дүүрэн': 100 };
+const CROWD_CLS = { available: '', queue: 'queue', out: 'out', unknown: 'unknown' };
+
+async function openStation(id) {
+  const dlg = $('#dlg');
+  const base = data && [...data.refilled, ...data.selling92].find((r) => r.id === id);
+  $('#d-name').textContent = base ? base.name : 'ШТС';
+  $('#d-meta').textContent = base ? [base.brand, base.address || base.district].filter(Boolean).join(' · ') : '';
+  $('#d-body').innerHTML = '<p class="muted">Ачаалж байна…</p>';
+  if (!dlg.open) dlg.showModal();
+  try {
+    if (!base) throw new Error('ШТС олдсонгүй');
+    const res = await fetch(`${base.detail}?t=${Date.now()}`, { cache: 'no-store' });
+    const st = await res.json();
+    if (!res.ok) throw new Error(st.error || res.statusText);
+    if (!dlg.open) return;
+    renderStation(st);
+  } catch (e) {
+    $('#d-body').innerHTML = `<p class="muted">Алдаа: ${esc(e.message)}</p>`;
+  }
+}
+
+function renderStation(st) {
+  $('#d-name').textContent = st.name;
+  $('#d-meta').textContent = [st.brand, st.operator, st.address || st.district, st.work_hours && `🕒 ${st.work_hours}`]
+    .filter(Boolean).join(' · ');
+  const g = st.gov;
+  const parts = [];
+
+  parts.push('<h4>📷 Камер</h4>');
+  parts.push(st.cams.length
+    ? `<div class="cam-tabs">${st.cams.length > 1 ? st.cams.map((c, i) =>
+        `<button data-cam="${i}">${esc(c.label)}</button>`).join('') : ''}</div>
+      <video id="cam-video" controls muted playsinline autoplay></video>
+      <p id="cam-note"></p>`
+    : '<p class="muted">Энэ ШТС-д камер холбогдоогүй байна.</p>');
+
+  parts.push('<h4>⛽ Шатахуун (ШТС-ын систем)</h4>');
+  if (g) {
+    const run = g.dispensing
+      ? (g.started_at ? `Түгээлт ${clock(g.started_at)}-аас явж байна` : 'Түгээж байна')
+      : (g.stopped_at ? `Түгээлт ${clock(g.stopped_at)}-д зогссон` : 'Түгээлт зогссон');
+    parts.push(`<p class="state-line">${esc(g.state)}</p>
+      <p class="muted">${esc([run, g.nozzles != null ? `${g.nozzles} хошуу ажиллаж байна` : '',
+        g.confirmed_at ? `ШТС ${clock(g.confirmed_at)}-д шинэчилсэн (${ago(g.confirmed_at)})` : ''].filter(Boolean).join(' · '))}</p>`);
+    parts.push(g.fuels.length ? `<div class="fuels">${g.fuels.map((f) => {
+      const pct = TANK[f.tank_level];
+      const left = f.cars_left != null ? (f.cars_left <= 0 ? 'Тооцоогоор дууссан' : `~${f.cars_left} машин`) : '';
+      return `<div class="fuel"><b>${esc(f.label)}</b>
+        <span class="chip ${f.sale === 'sell' ? (f.estimated ? 'est' : '') : f.sale}">${esc(f.sale_word)}${f.estimated ? ' · тооцоолсон' : ''}</span>
+        ${f.state ? `<small>${esc(f.state)}</small>` : ''}
+        ${f.price ? `<small><b>${money(f.price)}</b></small>` : ''}
+        ${left ? `<small>${esc(left)}</small>` : ''}
+        ${f.tank_level ? `<div class="tank"><i style="width:${pct ?? 0}%;background:${esc(f.tank_color || '#94a3b8')}"></i></div>
+          <small>Сав: ${esc(f.tank_level)}${f.tank_measured_at ? ` · ${esc(clock(f.tank_measured_at))}` : ''}</small>` : ''}
+      </div>`;
+    }).join('')}</div>` : '<p class="muted">Түлшний мэдээ ирээгүй.</p>');
+    if (g.refills.length) {
+      parts.push(`<h4>Орлого буусан</h4><ul class="hist">${g.refills.map((r) => `<li>
+        <b>${esc(r.label)}</b> · ${esc(r.change)}
+        <small>${esc(clock(r.from_at))} – ${esc(clock(r.at))} хооронд · ${esc(ago(r.at))}</small></li>`).join('')}</ul>`);
+    }
+  } else {
+    parts.push('<p class="muted">Энэ ШТС системээр мэдээ илгээгээгүй байна.</p>');
+  }
+
+  parts.push('<h4>👥 Хүмүүсийн мэдээ (benzin.mn)</h4>');
+  if (st.crowd.length) {
+    parts.push(`<div class="fuels">${st.crowd.map((c) => `<div class="fuel"><b>${esc(c.label)}</b>
+      <span class="chip ${CROWD_CLS[c.status_code] ?? 'unknown'}">${esc(c.status)}</span>
+      ${c.wait ? `<small>Хүлээлт: ${esc(c.wait)}</small>` : ''}
+      <small>${esc(ago(c.reported_at))}${c.reports ? ` · ${c.reports} мэдээ` : ''}</small>
+      ${c.note ? `<small>«${esc(c.note)}»</small>` : ''}</div>`).join('')}</div>`);
+  }
+  if (st.last_queue && st.last_queue.cars != null) {
+    parts.push(`<p class="muted">Сүүлийн дараалал: ~${st.last_queue.cars} машин · ${esc(ago(st.last_queue.at))}</p>`);
+  }
+  parts.push(st.history.length ? `<ul class="hist">${st.history.map((h) => `<li>
+      <span class="chip ${CROWD_CLS[h.status_code] ?? 'unknown'}">${esc(h.label)} · ${esc(h.status)}</span>
+      ${h.wait ? `<span class="muted">${esc(h.wait)}</span>` : ''}
+      ${h.note ? `<div>${esc(h.note)}</div>` : ''}
+      ${h.replies.map((x) => `<small>↳ ${esc(x)}</small>`).join('')}
+      <small>${esc(clock(h.at))} · ${esc(ago(h.at))}</small></li>`).join('')}</ul>`
+    : (st.crowd.length ? '' : '<p class="muted">Хүмүүсийн мэдээ алга.</p>'));
+
+  parts.push(`<p class="muted" style="margin-top:16px"><a href="${esc(st.benzin_url)}" target="_blank" rel="noopener">benzin.mn дээр нээх →</a>
+    · <a href="${esc(st.map_url)}" target="_blank" rel="noopener">Google Maps</a></p>`);
+
+  $('#d-body').innerHTML = parts.join('');
+  if (st.cams.length) {
+    $('#d-body').querySelectorAll('[data-cam]').forEach((b) =>
+      b.addEventListener('click', () => playCam(st.cams, Number(b.dataset.cam))));
+    playCam(st.cams, 0);
+  }
+}
+
+/* Safari, шинэ Chrome HLS-ийг өөрсдөө тоглуулна: stream-ийг шууд src-д тавина.
+   crossorigin атрибут тавихгүй — тавибал CORS хүсэлт болж ubtraffic.mn татгалзана.
+   Бусад браузер hls.js-ээр манай /cam/ proxy-оор дамжуулна. */
+function playCam(cams, index) {
+  stopCam();
+  const cam = cams[index];
+  const video = $('#cam-video');
+  const note = $('#cam-note');
+  if (!cam || !video) return;
+  $('#d-body').querySelectorAll('[data-cam]').forEach((b) =>
+    b.classList.toggle('on', Number(b.dataset.cam) === index));
+  note.textContent = `${cam.label} · асааж байна… (анх асаахад 10–30 секунд болж магадгүй)`;
+  let retries = 0;
+  const retry = () => {
+    if (retries++ >= 6) { note.textContent = `${cam.label} · Камер одоогоор ажиллахгүй байна.`; return false; }
+    note.textContent = `${cam.label} · камер асаж байна, дахин оролдож байна (${retries}/6)…`;
+    return true;
+  };
+  video.onplaying = () => { note.textContent = `${cam.label} · шууд дамжуулалт`; };
+
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.onerror = () => { if (video.getAttribute('src') && retry()) setTimeout(() => { video.src = cam.url; video.play().catch(() => {}); }, 5000); };
+    video.src = cam.url;
+    video.play().catch(() => {});
+  } else if (data.cam_proxy && window.Hls && Hls.isSupported()) {
+    // Proxy зөвхөн локал server.py дээр бий; GitHub Pages дээр энэ салбар орохгүй.
+    const proxied = '/cam' + new URL(cam.url).pathname;
+    hls = new Hls({ manifestLoadingMaxRetry: 6, manifestLoadingRetryDelay: 5000, levelLoadingMaxRetry: 6 });
+    hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { if (retry()) setTimeout(() => hls && hls.loadSource(proxied), 5000); } });
+    hls.loadSource(proxied);
+    hls.attachMedia(video);
+    video.play().catch(() => {});
+  } else {
+    note.innerHTML = `Энэ браузер камер тоглуулж чадахгүй (Safari эсвэл Chrome ашиглана уу). <a href="${esc(cam.url)}" target="_blank" rel="noopener">Stream нээх</a>`;
+  }
+}
+
+function stopCam() {
+  if (hls) { hls.destroy(); hls = null; }
+  const video = $('#cam-video');
+  if (video) { video.onerror = null; video.removeAttribute('src'); video.load(); }
+}
+
+$('#d-close').addEventListener('click', () => $('#dlg').close());
+$('#dlg').addEventListener('close', stopCam);
+$('#dlg').addEventListener('click', (e) => { if (e.target === $('#dlg')) $('#dlg').close(); });
+
+document.addEventListener('click', (e) => {
+  const show = e.target.closest('[data-show]');
+  if (show) { e.stopPropagation(); showOnMap(show.dataset.show); return; }
+  if (e.target.closest('a')) return;
+  const row = e.target.closest('tbody tr[data-id]');
+  if (row) openStation(row.dataset.id);
+});
+
+$('#load').addEventListener('click', load);
+$('#fuel').addEventListener('change', () => data && render());
+$('#euro92').addEventListener('change', () => data && render());
+$('#outer').addEventListener('change', () => data && render());
+$('#district').addEventListener('change', () => data && render());
+</script>
+</body>
+</html>

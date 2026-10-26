@@ -1,0 +1,40 @@
+# benzin.mn-ийг ~10 минут тутам crawl хийж GitHub Pages руу deploy хийнэ.
+# Repo → Settings → Pages → Source: «GitHub Actions» гэж тохируулна.
+name: crawl-and-deploy
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # GitHub cron ихэвчлэн хэдэн минут хоцордог
+  workflow_dispatch:          # Actions таб дээрээс гараар ажиллуулах
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Crawl benzin.mn
+        run: python crawler.py --out _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
